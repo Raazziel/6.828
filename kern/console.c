@@ -136,6 +136,7 @@ cga_init(void)
 	uint16_t was;
 	unsigned pos;
 
+	// cga pointer?
 	cp = (uint16_t*) (KERNBASE + CGA_BUF);
 	was = *cp;
 	*cp = (uint16_t) 0xA55A;
@@ -167,18 +168,22 @@ cga_putc(int c)
 		c |= 0x0700;
 
 	switch (c & 0xff) {
+//	    backspace
 	case '\b':
 		if (crt_pos > 0) {
 			crt_pos--;
 			crt_buf[crt_pos] = (c & ~0xff) | ' ';
 		}
 		break;
+//		carrige return
 	case '\n':
 		crt_pos += CRT_COLS;
 		/* fallthru */
+//		CRLF !
 	case '\r':
 		crt_pos -= (crt_pos % CRT_COLS);
 		break;
+//		tab == 5 space????
 	case '\t':
 		cons_putc(' ');
 		cons_putc(' ');
@@ -383,7 +388,7 @@ kbd_init(void)
 // whenever the corresponding interrupt occurs.
 
 #define CONSBUFSIZE 512
-
+// console buffer, rw queue
 static struct {
 	uint8_t buf[CONSBUFSIZE];
 	uint32_t rpos;
