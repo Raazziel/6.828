@@ -6,11 +6,13 @@
 #include <inc/string.h>
 #include <inc/assert.h>
 #include <inc/elf.h>
+#include <inc/memlayout.h>
 
 #include <kern/env.h>
 #include <kern/pmap.h>
 #include <kern/trap.h>
 #include <kern/monitor.h>
+
 
 struct Env *envs = NULL;		// All environments
 struct Env *curenv = NULL;		// The current env
@@ -116,9 +118,15 @@ env_init(void)
 {
 	// Set up envs array
 	// LAB 3: Your code here.
-
-	// Per-CPU part of the initialization
-	env_init_percpu();
+    struct Env *end, *e;
+    end = env_free_list = envs;
+    for (uint32_t i = 1; i < NENV; ++i) {
+        e = envs + i;
+        end->env_link = e;
+        end = e;
+    }
+    // Per-CPU part of the initialization
+    env_init_percpu();
 }
 
 // Load GDT and segment descriptors.
@@ -159,8 +167,10 @@ env_setup_vm(struct Env *e)
 	struct PageInfo *p = NULL;
 
 	// Allocate a page for the page directory
-	if (!(p = page_alloc(ALLOC_ZERO)))
-		return -E_NO_MEM;
+    if (!(p = page_alloc(ALLOC_ZERO)))
+        return -E_NO_MEM;
+    p->pp_ref++;
+    e->env_pgdir =(pde_t*) (page2kva(p));
 
 	// Now, set e->env_pgdir and initialize the page directory.
 	//
@@ -179,8 +189,8 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
-
-	// UVPT maps the env's own page table read-only.
+    memcpy(e->env_pgdir, kern_pgdir, PGSIZE);
+    // UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
 
@@ -267,6 +277,15 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+    void *start, *end;
+    start = ROUNDDOWN(va, PGSIZE),end = ROUNDUP(va + len, PGSIZE);
+    for (; start < end; start += PGSIZE) {
+        struct PageInfo *pi = page_alloc(0);
+        if (page_insert(e->env_pgdir, pi, start, PTE_U | PTE_W) < 0)
+            panic("not enough mem");
+        memset(start,0,PGSIZE);
+    }
+
 }
 
 //
@@ -327,7 +346,37 @@ load_icode(struct Env *e, uint8_t *binary)
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
+//    show_mem();
+    struct PageInfo *pi = page_alloc(0);
+    pi->pp_ref++;
+    if(page_insert(e->env_pgdir, pi, (void *)USTACKTOP - PGSIZE, PTE_U | PTE_W)<0)
+        panic("not mem wowwwwwwwww");
 	// LAB 3: Your code here.
+    struct Elf *elfhdr = (void *) binary;
+    if (elfhdr->e_magic != ELF_MAGIC)
+        panic("bad format\n");
+    struct Proghdr *ph = (struct Proghdr *) (binary + elfhdr->e_phoff);
+    struct Proghdr *eph = ph + elfhdr->e_phnum;
+//    cprintf("before:lcr\n");
+    lcr3(PADDR(e->env_pgdir));
+    e->env_tf.tf_eip = elfhdr->e_entry;
+    for (; ph < eph; ph++) {
+        if (ph->p_type != ELF_PROG_LOAD || ph->p_memsz == 0)
+            continue;
+//        cprintf("alloc segment:%x,%x\n", ph->p_va, ph->p_memsz);
+        region_alloc(e, (void *) ph->p_va, ph->p_memsz);
+        memcpy((void *)ph->p_va, binary + ph->p_offset, ph->p_filesz);
+
+//        uint32_t offset = 0;
+//        while (len >= PGSIZE) {
+//            void *address = ph->p_memsz + offset;
+//            memcpy(address, binary + ph->p_offset + offset, PGSIZE);
+//            len -= PGSIZE;
+//            offset += PGSIZE;
+//        }
+//        void *address = page2kva(page_lookup(e->env_pgdir, (void *)(ph->p_memsz + offset), 0));
+//        memcpy(address, binary + ph->p_offset + offset, len);
+    }
 }
 
 //
@@ -341,6 +390,10 @@ void
 env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
+	struct Env *e;
+    env_alloc(&e, 0);
+    e->env_type = type;
+    load_icode(e, binary);
 }
 
 //
@@ -457,7 +510,15 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
+    if (curenv) {
+        curenv->env_status = ENV_RUNNABLE;
+    }
+    curenv = e;
+    e->env_status = ENV_RUNNING;
+    e->env_runs++;
+//    panic("env_run not yet implemented");
 
+    env_pop_tf(&e->env_tf);
 	panic("env_run not yet implemented");
 }
 
