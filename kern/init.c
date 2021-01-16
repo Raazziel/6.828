@@ -3,7 +3,7 @@
 #include <inc/stdio.h>
 #include <inc/string.h>
 #include <inc/assert.h>
-
+#include <inc/x86.h>
 #include <kern/monitor.h>
 #include <kern/console.h>
 #include <kern/pmap.h>
@@ -26,7 +26,7 @@ i386_init(void)
 	cons_init();
 
 	cprintf("6828 decimal is %o octal!\n", 6828);
-
+    cprintf("envs addr:%p",&envs);
 	// Lab 2 memory management initialization functions
 	mem_init();
 
@@ -57,6 +57,7 @@ i386_init(void)
 
 	// Schedule and run the first user environment!
 	sched_yield();
+
 }
 
 // While boot_aps is booting a given CPU, it communicates the per-core
